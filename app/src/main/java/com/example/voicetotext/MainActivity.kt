@@ -19,7 +19,6 @@ import org.vosk.Model
 import org.vosk.Recognizer
 import org.vosk.android.RecognitionListener
 import org.vosk.android.SpeechService
-import org.vosk.android.StorageService
 
 class MainActivity : AppCompatActivity(), RecognitionListener {
 
@@ -93,28 +92,23 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
 
     private fun isFileBusy() = fileThread?.isAlive == true
 
-    private fun initModel() {
+        private fun initModel() {
         statusView.text = "Загрузка модели…"
-        try {
-            // Новый API: колбэк получает уже загруженную Model
-            StorageService.unpack(
-                this,
-                "model-ru",
-                "vosk-model-small-ru-0.22.zip",
-                { m: Model ->
-                    mainHandler.post {
-                        model = m
-                        statusView.text = "Готов к работе"
-                    }
-                },
-                { e: Exception ->
-                    postError("Не удалось загрузить модель: ${e.message}")
+        Thread {
+            try {
+                val root = ModelLoader.ensureModel(
+                    this, "vosk-model-small-ru-0.22.zip", "model-ru"
+                )
+                val m = Model(root.absolutePath)
+                mainHandler.post {
+                    model = m
+                    statusView.text = "Готов к работе"
                 }
-            )
-        } catch (e: Exception) {
-            postError("Ошибка загрузки модели: ${e.message}")
+            } catch (e: Exception) {
+                postError("Не удалось загрузить модель: ${e.message}")
+            }
+        }.start()
         }
-    }
 
     // ---------- Режим 1: потоковое распознавание с микрофона ----------
 
