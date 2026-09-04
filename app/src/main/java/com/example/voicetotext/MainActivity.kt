@@ -13,14 +13,13 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import org.json.JSONObject
-import org.vosk.KaldiRecognizer
 import org.vosk.LibVosk
 import org.vosk.LogLevel
 import org.vosk.Model
+import org.vosk.Recognizer
 import org.vosk.android.RecognitionListener
 import org.vosk.android.SpeechService
 import org.vosk.android.StorageService
-import java.io.File
 
 class MainActivity : AppCompatActivity(), RecognitionListener {
 
@@ -95,44 +94,26 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
     private fun isFileBusy() = fileThread?.isAlive == true
 
     private fun initModel() {
-        Thread {
-            try {
-                StorageService.unpack(
-                    this,
-                    "model-ru",
-                    "vosk-model-small-ru-0.22.zip",
-                    { modelPath: String ->
-                        try {
-                            val root = findModelRoot(File(modelPath))
-                            val m = Model(root.absolutePath)
-                            mainHandler.post {
-                                model = m
-                                statusView.text = "Готов к работе"
-                            }
-                        } catch (e: Exception) {
-                            postError("Ошибка инициализации модели: ${e.message}")
-                        }
-                    },
-                    { e: Exception -> postError("Не удалось распаковать модель: ${e.message}") }
-                )
-            } catch (e: Exception) {
-                postError("Ошибка загрузки модели: ${e.message}")
-            }
-        }.start()
-    }
-
-    // Находит папку модели даже если внутри zip была вложенная папка
-    private fun findModelRoot(dir: File): File {
-        if (File(dir, "conf").isDirectory) return dir
-        val subdirs = dir.listFiles()?.filter { it.isDirectory }.orEmpty()
-        for (child in subdirs) {
-            if (File(child, "conf").isDirectory) return child
+        statusView.text = "Загрузка модели…"
+        try {
+            // Новый API: колбэк получает уже загруженную Model
+            StorageService.unpack(
+                this,
+                "model-ru",
+                "vosk-model-small-ru-0.22.zip",
+                { m: Model ->
+                    mainHandler.post {
+                        model = m
+                        statusView.text = "Готов к работе"
+                    }
+                },
+                { e: Exception ->
+                    postError("Не удалось загрузить модель: ${e.message}")
+                }
+            )
+        } catch (e: Exception) {
+            postError("Ошибка загрузки модели: ${e.message}")
         }
-        for (child in subdirs) {
-            val nested = findModelRoot(child)
-            if (nested != child) return nested
-        }
-        return dir
     }
 
     // ---------- Режим 1: потоковое распознавание с микрофона ----------
@@ -143,7 +124,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         resultView.text = ""
         partialView.text = ""
         try {
-            val recognizer = KaldiRecognizer(m, 16000f)
+            val recognizer = Recognizer(m, 16000f)
             val service = SpeechService(recognizer, 16000f)
             service.startListening(this)
             speechService = service
@@ -202,7 +183,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         val m = model ?: return
         fileThread = Thread {
             try {
-                KaldiRecognizer(m, 16000f).use { recognizer ->
+                Recognizer(m, 16000f).use { recognizer ->
                     val sb = StringBuilder()
                     AudioDecoder.decode(this, uri) { chunk, sampleRate, channels ->
                         val pcm = PcmUtil.toMono16k(chunk, sampleRate, channels)
@@ -211,7 +192,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
                             val segmentFinished = recognizer.acceptWaveForm(bytes, bytes.size)
                             if (segmentFinished) {
                                 val t = JSONObject(recognizer.result).optString("text", "")
-                                if (t.isNotBlank()) sb.append(t).append(" ")
+                                if (t.isNotBlank()) sb.append(t).append(' ')
                             } else {
                                 val p = JSONObject(recognizer.partialResult).optString("text", "")
                                 if (p.isNotBlank()) mainHandler.post { partialView.text = p }
